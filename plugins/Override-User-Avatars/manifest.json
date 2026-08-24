@@ -1,12 +1,12 @@
 {
   "name": "Override User Avatars",
-  "description": "Set custom profile pictures for multiple Discord users.",
+  "description": "Store custom profile pictures locally for multiple Discord users.",
   "authors": [
     {
         "name": "Furretar",
         "id": "291303812516544524"
     }
 ],
-  "version": "1.1.0",
+  "version": "1.2.0",
   "main": "src/index.ts"
 }
