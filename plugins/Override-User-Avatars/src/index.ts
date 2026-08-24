@@ -1,5 +1,6 @@
 import { findByProps, findByStoreName } from "@vendetta/metro";
 import { FluxDispatcher } from "@vendetta/metro/common";
+import { after } from "@vendetta/patcher";
 import { storage } from "@vendetta/plugin";
 
 type AvatarOverride = {
@@ -28,63 +29,48 @@ function resolveUrl(entry: AvatarOverride): string {
 export function onLoad(): void {
     console.log(`${TAG} loaded`);
 
-    const UserStore = findByStoreName("UserStore");
-    if (!UserStore) {
-        console.log(`${TAG} userStore not found`);
-        return;
-    }
-
     const avatarModule = findByProps("getUserAvatarURL");
     if (!avatarModule) {
         console.log(`${TAG} avatar module not found`);
         return;
     }
 
-    // Overrides avatar sources in DMs and group chats for configured users.
-    if (avatarModule.getUserAvatarSource) {
-        const originalGetUserAvatarSource = avatarModule.getUserAvatarSource;
-        avatarModule.getUserAvatarSource = function (...args) {
+    // Overrides completed avatar sources without replacing Discord's function.
+    if (typeof avatarModule.getUserAvatarSource === "function") {
+        patches.push(after("getUserAvatarSource", avatarModule, (args, original) => {
             const user = args[0];
             const entry = user?.id ? getOverrides()[user.id] : undefined;
             const overrideUrl = entry ? resolveUrl(entry) : "";
 
-            if (overrideUrl) {
-                const original = originalGetUserAvatarSource.apply(this, args);
-                if (original) {
-                    return {
-                        ...original,
-                        uri: overrideUrl
-                    };
-                }
-                return original;
+            if (overrideUrl && original) {
+                return {
+                    ...original,
+                    uri: overrideUrl
+                };
             }
 
-            return originalGetUserAvatarSource.apply(this, args);
-        };
-
-        // Restores the original DM and group chat avatar source function.
-        patches.push(() => { avatarModule.getUserAvatarSource = originalGetUserAvatarSource; });
+            return original;
+        }));
     }
 
-    const originalGetUserAvatarURL = avatarModule.getUserAvatarURL;
+    // Overrides completed avatar URLs without replacing Discord's function.
+    if (typeof avatarModule.getUserAvatarURL === "function") {
+        patches.push(after("getUserAvatarURL", avatarModule, (args, original) => {
+            const user = args[0];
+            const entry = user?.id ? getOverrides()[user.id] : undefined;
+            const overrideUrl = entry ? resolveUrl(entry) : "";
 
-    // Overrides avatar URLs in voice calls for configured users.
-    avatarModule.getUserAvatarURL = function (...args) {
-        const user = args[0];
-        const entry = user?.id ? getOverrides()[user.id] : undefined;
-        const overrideUrl = entry ? resolveUrl(entry) : "";
-
-        if (overrideUrl) {
-            return overrideUrl;
-        }
-
-        return originalGetUserAvatarURL.apply(this, args);
-    };
-
-    // Restores the original voice call avatar URL function.
-    patches.push(() => { avatarModule.getUserAvatarURL = originalGetUserAvatarURL; });
+            return overrideUrl || original;
+        }));
+    }
 
     console.log(`${TAG} patches applied`);
+
+    const UserStore = findByStoreName("UserStore");
+    if (!UserStore) {
+        console.log(`${TAG} userStore not found; skipping ui refresh`);
+        return;
+    }
 
     try {
         for (const userId of Object.keys(getOverrides())) {
