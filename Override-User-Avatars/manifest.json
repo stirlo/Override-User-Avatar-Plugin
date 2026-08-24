@@ -1,1 +1,1 @@
-{"name":"Override User Avatars","description":"Store custom profile pictures locally for multiple Discord users.","authors":[{"name":"Furretar","id":"291303812516544524"}],"version":"1.2.1","main":"index.js","hash":"b195451a66ebbfaf56f5c0c5690dbc122f70cea4497a2816fd1c03f1c3f5ed7a"}
+{"name":"Override User Avatars","description":"Store custom profile pictures locally for multiple Discord users.","authors":[{"name":"Furretar","id":"291303812516544524"}],"version":"1.2.2","main":"index.js","hash":"5233f87ae8633656b465375a96728ce8014a82f79f49474b01cca6c63f24c298"}

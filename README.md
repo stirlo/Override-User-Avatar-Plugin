@@ -22,6 +22,10 @@ The install URL points to a polymanifest deployment. The client reads the genera
 
 Avatar functions are extended through Vendetta's patcher API so the plugin can coexist with Kettu and other plugins that touch the same Discord functions.
 
+User and guild-member avatar paths are both covered, so the same local override appears in DMs and server contexts.
+
+Settings can copy a versioned JSON backup to the system clipboard and merge it into storage on another device. The backup includes all embedded image data. Treat it as sensitive because Apple Universal Clipboard or another clipboard manager may copy it between devices.
+
 ## Known issues
 
 The plugin does not change profile pictures in notifications.
