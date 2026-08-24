@@ -25,6 +25,11 @@ function resolveUrl(entry: AvatarOverride): string {
     return entry.primary || entry.fallback || "";
 }
 
+// Extracts a user ID from Discord's guild-member avatar argument shapes.
+function getGuildUserId(value: any): string {
+    return value?.userId || value?.user?.id || value?.id || "";
+}
+
 // Installs avatar overrides and refreshes each configured user in the UI.
 export function onLoad(): void {
     console.log(`${TAG} loaded`);
@@ -58,6 +63,35 @@ export function onLoad(): void {
         patches.push(after("getUserAvatarURL", avatarModule, (args, original) => {
             const user = args[0];
             const entry = user?.id ? getOverrides()[user.id] : undefined;
+            const overrideUrl = entry ? resolveUrl(entry) : "";
+
+            return overrideUrl || original;
+        }));
+    }
+
+    // Overrides completed guild-member avatar sources used in server contexts.
+    if (typeof avatarModule.getGuildMemberAvatarSource === "function") {
+        patches.push(after("getGuildMemberAvatarSource", avatarModule, (args, original) => {
+            const userId = getGuildUserId(args[0]);
+            const entry = userId ? getOverrides()[userId] : undefined;
+            const overrideUrl = entry ? resolveUrl(entry) : "";
+
+            if (overrideUrl && original) {
+                return {
+                    ...original,
+                    uri: overrideUrl
+                };
+            }
+
+            return original;
+        }));
+    }
+
+    // Overrides completed guild-member avatar URLs used outside image sources.
+    if (typeof avatarModule.getGuildMemberAvatarURL === "function") {
+        patches.push(after("getGuildMemberAvatarURL", avatarModule, (args, original) => {
+            const userId = getGuildUserId(args[0]);
+            const entry = userId ? getOverrides()[userId] : undefined;
             const overrideUrl = entry ? resolveUrl(entry) : "";
 
             return overrideUrl || original;

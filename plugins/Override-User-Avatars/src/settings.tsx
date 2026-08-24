@@ -1,4 +1,4 @@
-import { React, ReactNative } from "@vendetta/metro/common";
+import { clipboard, React, ReactNative } from "@vendetta/metro/common";
 import { Forms } from "@vendetta/ui/components";
 import { storage } from "@vendetta/plugin";
 import { useProxy } from "@vendetta/storage";
@@ -10,7 +10,14 @@ type AvatarOverride = {
     fallback?: string;
 };
 
+type BackupPayload = {
+    format: 1;
+    exportedAt: string;
+    overrides: Record<string, AvatarOverride>;
+};
+
 const MAX_IMAGE_BYTES = 750_000;
+const MAX_BACKUP_CHARACTERS = 10_000_000;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
 
 // Converts a downloaded image blob into a local data URI for persistent storage.
@@ -67,6 +74,55 @@ function describeError(error: unknown): string {
     return error instanceof Error ? error.message : "The image could not be stored locally.";
 }
 
+// Serializes every override, including embedded images, into a versioned backup.
+function createBackupJson(overrides: Record<string, AvatarOverride>): string {
+    const backup: BackupPayload = {
+        format: 1,
+        exportedAt: new Date().toISOString(),
+        overrides
+    };
+
+    return JSON.stringify(backup);
+}
+
+// Validates a clipboard backup before it is allowed to merge into plugin storage.
+function parseBackupJson(value: string): Record<string, AvatarOverride> {
+    if (!value || value.length > MAX_BACKUP_CHARACTERS) {
+        throw new Error("The clipboard does not contain a supported backup size.");
+    }
+
+    let backup: Partial<BackupPayload>;
+    try {
+        backup = JSON.parse(value) as Partial<BackupPayload>;
+    } catch {
+        throw new Error("The clipboard does not contain valid backup JSON.");
+    }
+    if (backup.format !== 1 || !backup.overrides || Array.isArray(backup.overrides)) {
+        throw new Error("The clipboard does not contain an Override User Avatars backup.");
+    }
+
+    const restored: Record<string, AvatarOverride> = {};
+    for (const [id, entry] of Object.entries(backup.overrides)) {
+        if (!id.trim() || !entry || typeof entry.primary !== "string" || !entry.primary) {
+            throw new Error("The backup contains an invalid avatar entry.");
+        }
+        if (entry.fallback !== undefined && typeof entry.fallback !== "string") {
+            throw new Error("The backup contains an invalid fallback image.");
+        }
+
+        restored[id] = {
+            primary: entry.primary,
+            ...(entry.fallback ? { fallback: entry.fallback } : {})
+        };
+    }
+
+    if (Object.keys(restored).length === 0) {
+        throw new Error("The backup does not contain any avatar entries.");
+    }
+
+    return restored;
+}
+
 // Renders the form for adding overrides and the list of saved users.
 export default function Settings() {
     useProxy(storage);
@@ -76,6 +132,7 @@ export default function Settings() {
     const [fallbackUrl, setFallbackUrl] = React.useState("");
     const [importStatus, setImportStatus] = React.useState("");
     const [isImporting, setIsImporting] = React.useState(false);
+    const [backupStatus, setBackupStatus] = React.useState("");
     const overrides: Record<string, AvatarOverride> = storage.overrides ?? {};
 
     // Downloads and stores a new override locally using a new object for reactivity.
@@ -142,6 +199,31 @@ export default function Settings() {
         );
     }
 
+    // Copies a complete versioned backup into the system clipboard.
+    function copyBackup(): void {
+        if (Object.keys(overrides).length === 0) {
+            setBackupStatus("There are no avatar entries to back up.");
+            return;
+        }
+
+        clipboard.setString(createBackupJson(overrides));
+        setBackupStatus("Backup copied. It includes the embedded images.");
+    }
+
+    // Restores validated avatar entries from the current system clipboard.
+    async function restoreBackup(): Promise<void> {
+        try {
+            const restored = parseBackupJson(await clipboard.getString());
+            storage.overrides = {
+                ...(storage.overrides ?? {}),
+                ...restored
+            };
+            setBackupStatus(`Restored ${Object.keys(restored).length} avatar entr${Object.keys(restored).length === 1 ? "y" : "ies"}.`);
+        } catch (error) {
+            setBackupStatus(describeError(error));
+        }
+    }
+
     return (
         <ReactNative.ScrollView>
             <FormRow label="User ID" />
@@ -171,6 +253,17 @@ export default function Settings() {
             />
             <FormDivider />
             {Object.entries(overrides).map(renderOverride)}
+            <FormDivider />
+            <FormRow
+                label="Copy backup JSON"
+                subLabel="Includes images; the system clipboard may sync to other devices"
+                onPress={copyBackup}
+            />
+            <FormRow
+                label="Restore backup from clipboard"
+                subLabel={backupStatus}
+                onPress={restoreBackup}
+            />
         </ReactNative.ScrollView>
     );
 }
