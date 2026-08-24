@@ -2,18 +2,31 @@ import { findByProps, findByStoreName } from "@vendetta/metro";
 import { FluxDispatcher } from "@vendetta/metro/common";
 import { storage } from "@vendetta/plugin";
 
-// tag added to all print statements to help with debugging with logcat on adb
+type AvatarOverride = {
+    primary: string;
+    fallback?: string;
+};
+
+// Tag added to all print statements to help with debugging with logcat on adb.
 const TAG = "[custom-avatars]";
 
 let patches = [];
 
 export { default as settings } from "./settings";
 
+// Returns every configured avatar override, or an empty map before setup.
+function getOverrides(): Record<string, AvatarOverride> {
+    return storage.overrides ?? {};
+}
+
+// Selects the primary URL, falling back only when the primary field is empty.
+function resolveUrl(entry: AvatarOverride): string {
+    return entry.primary || entry.fallback || "";
+}
+
+// Installs avatar overrides and refreshes each configured user in the UI.
 export function onLoad(): void {
     console.log(`${TAG} loaded`);
-
-    const TARGET_ID = storage.targetUserId;
-    const OVERRIDE_URL = storage.imageUrl;
 
     const UserStore = findByStoreName("UserStore");
     if (!UserStore) {
@@ -27,62 +40,72 @@ export function onLoad(): void {
         return;
     }
 
-
-
-    // patch getUserAvatarSource, overrides avatar in DMs and group chats
+    // Overrides avatar sources in DMs and group chats for configured users.
     if (avatarModule.getUserAvatarSource) {
         const originalGetUserAvatarSource = avatarModule.getUserAvatarSource;
         avatarModule.getUserAvatarSource = function (...args) {
             const user = args[0];
+            const entry = user?.id ? getOverrides()[user.id] : undefined;
+            const overrideUrl = entry ? resolveUrl(entry) : "";
 
-            // only intercept target user
-            if (user?.id === TARGET_ID) {
+            if (overrideUrl) {
                 const original = originalGetUserAvatarSource.apply(this, args);
                 if (original) {
                     return {
                         ...original,
-                        uri: OVERRIDE_URL
+                        uri: overrideUrl
                     };
                 }
+                return original;
             }
-            // ignore everyone else
+
             return originalGetUserAvatarSource.apply(this, args);
         };
+
+        // Restores the original DM and group chat avatar source function.
         patches.push(() => { avatarModule.getUserAvatarSource = originalGetUserAvatarSource; });
     }
 
-    // patch getUserAvatarURL, overrides avatar in voice calls
     const originalGetUserAvatarURL = avatarModule.getUserAvatarURL;
+
+    // Overrides avatar URLs in voice calls for configured users.
     avatarModule.getUserAvatarURL = function (...args) {
         const user = args[0];
-        // only intercept for target user
-        if (user?.id === TARGET_ID) {
-            return OVERRIDE_URL;
+        const entry = user?.id ? getOverrides()[user.id] : undefined;
+        const overrideUrl = entry ? resolveUrl(entry) : "";
+
+        if (overrideUrl) {
+            return overrideUrl;
         }
-        // ignore other users
+
         return originalGetUserAvatarURL.apply(this, args);
     };
+
+    // Restores the original voice call avatar URL function.
     patches.push(() => { avatarModule.getUserAvatarURL = originalGetUserAvatarURL; });
 
     console.log(`${TAG} patches applied`);
 
-    // refresh ui
     try {
-        FluxDispatcher.dispatch({
-            type: "USER_UPDATE",
-            user: UserStore.getUser(TARGET_ID)
-        });
+        for (const userId of Object.keys(getOverrides())) {
+            FluxDispatcher.dispatch({
+                type: "USER_UPDATE",
+                user: UserStore.getUser(userId)
+            });
+        }
         console.log(`${TAG} ui refreshed`);
     } catch (e) {
         console.log(`${TAG} could not trigger refresh:`, e.message);
     }
 }
 
+// Restores every patched avatar function when the plugin unloads.
 export function onUnload(): void {
     console.log(`${TAG} unloading...`);
 
-    // restore patches
-    patches.forEach(unpatch => unpatch());
+    for (const unpatch of patches) {
+        unpatch();
+    }
     patches = [];
 
     console.log(`${TAG} unloaded`);
